@@ -9,3 +9,6 @@ numpy==1.26.4
 diffusers==0.30.0
 compel==2.0.3
 datasets==2.20.0
+lpips==0.1.4
+munch==3.0.0
+rich==13.4.1
