@@ -1,0 +1,13 @@
+{
+  "description": "AnoPILaD",
+  "workdir": "./reconstruct_results",
+  "test_in_wsi": "/data1/jiamu/Lymphnode/anomaly_detection_lymphnode/",
+  "test_out_wsi": "/data1/jiamu/Seoul_SM_Hos/KA_STOP_LN/WSI_240214/",
+  "test_out_label": "/data1/jiamu/Seoul_SM_Hos/KA_STOP_LN/annotation_asap_240214/",
+  "lambda_value": "390",
+  "nine_percent": 0.99,
+  "erosion": true,
+  "metric": "avg",
+  "metric_inneed": ["lpips_pixel", "mse_latent"],
+  "metric2avg": ["lpips_pixel"]
+}
