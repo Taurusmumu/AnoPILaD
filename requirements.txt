@@ -1,0 +1,11 @@
+accelerate==0.26.0
+peft==0.7.0
+taming-transformers==0.0.1
+torch==2.0.1
+torchmetrics==1.0.0
+torchvision==0.15.2
+tqdm==4.67.1
+numpy==1.26.4
+diffusers==0.30.0
+compel==2.0.3
+datasets==2.20.0
