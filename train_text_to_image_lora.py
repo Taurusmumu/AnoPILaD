@@ -51,12 +51,13 @@ from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils.torch_utils import is_compiled_module
 
+from compel import Compel
 
 if is_wandb_available():
     import wandb
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
-check_min_version("0.33.0.dev0")
+# check_min_version("0.33.0.dev0")
 
 logger = get_logger(__name__, log_level="INFO")
 
@@ -114,6 +115,7 @@ def log_validation(
         f" {args.validation_prompt}."
     )
     pipeline = pipeline.to(accelerator.device)
+    compel_proc = Compel(tokenizer=pipeline.tokenizer, text_encoder=pipeline.text_encoder)
     pipeline.set_progress_bar_config(disable=True)
     generator = torch.Generator(device=accelerator.device)
     if args.seed is not None:
@@ -126,7 +128,9 @@ def log_validation(
 
     with autocast_ctx:
         for _ in range(args.num_validation_images):
-            images.append(pipeline(args.validation_prompt, num_inference_steps=30, generator=generator).images[0])
+            # images.append(pipeline(args.validation_prompt, num_inference_steps=30, generator=generator).images[0])
+            conditioning = compel_proc(args.validation_prompt)
+            images.append(pipeline(prompt_embeds=conditioning, num_inference_steps=30, generator=generator).images[0])
 
     for tracker in accelerator.trackers:
         phase_name = "test" if is_final_validation else "validation"
@@ -147,10 +151,28 @@ def log_validation(
 def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
     parser.add_argument(
+        "--conditioning_dropout_prob",
+        type=float,
+        default=0.2,
+        help="CFG",
+    )
+    parser.add_argument(
+        "--input_perturbation", type=float, default=0.1, help="The scale of input perturbation. Recommended 0.1."
+    )
+    parser.add_argument(
+        "--tracker_project_name",
+        type=str,
+        default="sd-model-finetuned-lora_project",
+        help=(
+            "The `project_name` argument passed to Accelerator.init_trackers for"
+            " more information see https://huggingface.co/docs/accelerate/v0.17.0/en/package_reference/accelerator#accelerate.Accelerator"
+        ),
+    )
+    parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
-        default=None,
-        required=True,
+        default='runwayml/stable-diffusion-v1-5',
+        # required=True,
         help="Path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
@@ -185,7 +207,8 @@ def parse_args():
     parser.add_argument(
         "--train_data_dir",
         type=str,
-        default=None,
+        default="/data1/jiamu/Lymphnode/256_20_v3/train_tmp",
+        required=True,
         help=(
             "A folder containing the training data. Folder contents must follow the structure described in"
             " https://huggingface.co/docs/datasets/image_dataset#imagefolder. In particular, a `metadata.jsonl` file"
@@ -202,7 +225,16 @@ def parse_args():
         help="The column of the dataset containing a caption or a list of captions.",
     )
     parser.add_argument(
-        "--validation_prompt", type=str, default=None, help="A prompt that is sampled during training for inference."
+        "--validation_prompt",
+        type=str,
+        default=[
+            'a histopathological photograph of (plasma cell-rich Germinal center)- and (lymphocytes) and (follicular dendritic cells)++',
+            'a histopathological photograph of (small dormant lymphocytes)++ and (lymphocytes)++ and (B-cell-rich non-germinal center) and (mantle zone) and (large B lymphocytes)',
+            'a histopathological photograph of secondary lymphoid follicles',
+            'a histopathological photograph of (mantle zone)+ and (small dormant lymphocytes) and (germinal center) and (lymphocytes) and (follicular dendritic cells)'
+        ],
+        nargs="+",
+        help=("A set of prompts evaluated every `--validation_epochs` and logged to `--report_to`."),
     )
     parser.add_argument(
         "--num_validation_images",
@@ -231,7 +263,7 @@ def parse_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="sd-model-finetuned-lora",
+        default="./pretrained_weights/sd-model-finetuned-lora",
         help="The output directory where the model predictions and checkpoints will be written.",
     )
     parser.add_argument(
@@ -240,11 +272,11 @@ def parse_args():
         default=None,
         help="The directory where the downloaded models and datasets will be stored.",
     )
-    parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
+    parser.add_argument("--seed", type=int, default=88888888, help="A seed for reproducible training.")
     parser.add_argument(
         "--resolution",
         type=int,
-        default=512,
+        default=256,
         help=(
             "The resolution for input images, all the images in the train/validation dataset will be resized to this"
             " resolution"
@@ -265,9 +297,9 @@ def parse_args():
         help="whether to randomly flip images horizontally",
     )
     parser.add_argument(
-        "--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader."
+        "--train_batch_size", type=int, default=4, help="Batch size (per device) for the training dataloader."
     )
-    parser.add_argument("--num_train_epochs", type=int, default=100)
+    parser.add_argument("--num_train_epochs", type=int, default=20)
     parser.add_argument(
         "--max_train_steps",
         type=int,
@@ -288,7 +320,7 @@ def parse_args():
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=1e-4,
+        default=1e-5,
         help="Initial learning rate (after the potential warmup period) to use.",
     )
     parser.add_argument(
@@ -377,7 +409,7 @@ def parse_args():
     parser.add_argument(
         "--report_to",
         type=str,
-        default="tensorboard",
+        default="wandb",
         help=(
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
@@ -387,7 +419,7 @@ def parse_args():
     parser.add_argument(
         "--checkpointing_steps",
         type=int,
-        default=500,
+        default=2000,
         help=(
             "Save a checkpoint of the training state every X updates. These checkpoints are only suitable for resuming"
             " training using `--resume_from_checkpoint`."
@@ -506,6 +538,7 @@ def main():
     unet.requires_grad_(False)
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
+    compel_proc = Compel(tokenizer=tokenizer, text_encoder=text_encoder)
 
     # For mixed precision training we cast all non-trainable weights (vae, non-lora text_encoder and non-lora unet) to half-precision
     # as these weights are only used for inference, keeping weights in full precision is not required.
@@ -634,9 +667,19 @@ def main():
     # We need to tokenize input captions and transform the images.
     def tokenize_captions(examples, is_train=True):
         captions = []
-        for caption in examples[caption_column]:
+        bsz = len(examples['text'])
+        if args.conditioning_dropout_prob is not None:
+            # random_p = torch.rand(bsz, device=latents.device)
+            random_p = np.random.rand(bsz)
+            prompt_mask = random_p < 2 * args.conditioning_dropout_prob
+            prompt_mask = list(np.where(prompt_mask)[0])
+
+        for idx, caption in enumerate(examples[caption_column]):
             if isinstance(caption, str):
-                captions.append(caption)
+                if idx in prompt_mask:
+                    captions.append('')
+                else:
+                    captions.append(caption)
             elif isinstance(caption, (list, np.ndarray)):
                 # take a random caption if there are multiple
                 captions.append(random.choice(caption) if is_train else caption[0])
@@ -644,10 +687,11 @@ def main():
                 raise ValueError(
                     f"Caption column `{caption_column}` should contain either strings or lists of strings."
                 )
-        inputs = tokenizer(
-            captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
-        )
-        return inputs.input_ids
+        # inputs = tokenizer(
+        #     captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
+        # )
+        # return inputs.input_ids
+        return captions
 
     # Preprocessing the datasets.
     train_transforms = transforms.Compose(
@@ -680,7 +724,8 @@ def main():
     def collate_fn(examples):
         pixel_values = torch.stack([example["pixel_values"] for example in examples])
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-        input_ids = torch.stack([example["input_ids"] for example in examples])
+        # input_ids = torch.stack([example["input_ids"] for example in examples])
+        input_ids = [example["input_ids"] for example in examples]
         return {"pixel_values": pixel_values, "input_ids": input_ids}
 
     # DataLoaders creation:
@@ -732,7 +777,7 @@ def main():
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("text2image-fine-tune", config=vars(args))
+        accelerator.init_trackers(args.tracker_project_name, config=vars(args))
 
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -798,7 +843,8 @@ def main():
                     noise += args.noise_offset * torch.randn(
                         (latents.shape[0], latents.shape[1], 1, 1), device=latents.device
                     )
-
+                if args.input_perturbation:
+                    new_noise = noise + args.input_perturbation * torch.randn_like(noise)
                 bsz = latents.shape[0]
                 # Sample a random timestep for each image
                 timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
@@ -806,10 +852,14 @@ def main():
 
                 # Add noise to the latents according to the noise magnitude at each timestep
                 # (this is the forward diffusion process)
-                noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+                if args.input_perturbation:
+                    noisy_latents = noise_scheduler.add_noise(latents, new_noise, timesteps)
+                else:
+                    noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
                 # Get the text embedding for conditioning
-                encoder_hidden_states = text_encoder(batch["input_ids"], return_dict=False)[0]
+                # encoder_hidden_states = text_encoder(batch["input_ids"], return_dict=False)[0]
+                encoder_hidden_states = compel_proc(batch["input_ids"])
 
                 # Get the target for loss depending on the prediction type
                 if args.prediction_type is not None:
