@@ -274,13 +274,10 @@ if __name__ == "__main__":
     model.eval()
     tokenizer = get_tokenizer()
 
-    for folder in ["train", "test_in", "test_out"]:
-        data_folder_path = os.path.join(args.data_root_path, folder)
-        if not os.path.isdir(data_folder_path):
-            continue
-        output_path = os.path.join(data_folder_path, "metadata.csv")
-        inference_dataset = ImageCaptionDataset(data_folder_path, preprocess)
-        inference_loader = torch.utils.data.DataLoader(inference_dataset, batch_size=args.batch_size, num_workers=32,
-                                                       pin_memory=False, shuffle=False)
+    data_folder_path = args.data_root_path
+    output_path = os.path.join(data_folder_path, "metadata.csv")
+    inference_dataset = ImageCaptionDataset(data_folder_path, preprocess)
+    inference_loader = torch.utils.data.DataLoader(inference_dataset, batch_size=args.batch_size, num_workers=32,
+                                                   pin_memory=False, shuffle=False)
 
-        largest_index_list = run(model, tokenizer, inference_loader, output_path=output_path, tag=folder)
+    largest_index_list = run(model, tokenizer, inference_loader, output_path=output_path, tag="train")  # Change tag to "train" or "test" for other datasets

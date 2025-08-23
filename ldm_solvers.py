@@ -1,10 +1,10 @@
 import torch.nn as nn
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 from compel import Compel
 import torch
 import numpy as np
 import torch.nn.functional as F
-from diffusers import DDIMScheduler, StableDiffusionPipeline,  PNDMScheduler
+from diffusers import DDIMScheduler, StableDiffusionPipeline
 from tqdm import tqdm
 
 
@@ -42,7 +42,7 @@ class StableDiffusion():
         self.compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder)
         self.unet = pipe.unet
 
-        self.scheduler = PNDMScheduler.from_pretrained(model_key, subfolder="scheduler")
+        self.scheduler = DDIMScheduler.from_pretrained(model_key, subfolder="scheduler")
         total_timesteps = len(self.scheduler.alphas)
         self.scheduler.set_timesteps(solver_config.num_sampling, device=device)
         self.skip = total_timesteps // solver_config.num_sampling
@@ -162,8 +162,8 @@ class StableDiffusion():
 
         return z.requires_grad_()
 
-@register_solver("pndm")
-class BasePNDM(StableDiffusion):
+@register_solver("ddim")
+class Sampler(StableDiffusion):
     """
     Basic DDIM solver for SD.
     Useful for text-to-image generation
@@ -175,7 +175,6 @@ class BasePNDM(StableDiffusion):
                                 cfg_guidance=7.5,
                                 prompt=["",""],
                                 target_size=(256, 256),
-                                callback_fn=None,
                                 start_lambda=1000,
                                 **kwargs):
         """
@@ -202,13 +201,6 @@ class BasePNDM(StableDiffusion):
             z0t = (zt - (1 - at).sqrt() * noise_pred) / at.sqrt()
             zt = at_prev.sqrt() * z0t + (1 - at_prev).sqrt() * noise_pred
             zt.detach_()
-            if callback_fn is not None:
-                callback_kwargs = {'z0t': z0t.detach(),
-                                   'zt': zt.detach(),
-                                   'decode': self.decode}
-                callback_kwargs = callback_fn(step, t, callback_kwargs)
-                z0t = callback_kwargs["z0t"]
-                zt = callback_kwargs["zt"]
 
         # for the last step, do not add noise
         gt_encode = self.encode(gt.to(self.dtype).to(self.device))
@@ -225,7 +217,6 @@ class BasePNDM(StableDiffusion):
                cfg_guidance=7.5,
                prompt=["",""],
                target_size=(512, 512),
-               callback_fn=None,
                **kwargs):
         """
         Main function that defines each solver.
@@ -254,14 +245,6 @@ class BasePNDM(StableDiffusion):
 
             # add noise
             zt = at_prev.sqrt() * z0t + (1-at_prev).sqrt() * noise_pred
-
-            if callback_fn is not None:
-                callback_kwargs = {'z0t': z0t.detach(),
-                                    'zt': zt.detach(),
-                                    'decode': self.decode}
-                callback_kwargs = callback_fn(step, t, callback_kwargs)
-                z0t = callback_kwargs["z0t"]
-                zt = callback_kwargs["zt"]
 
         # for the last step, do not add noise
         img = self.decode(z0t)
