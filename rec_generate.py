@@ -10,6 +10,8 @@ import csv
 import torch
 from tqdm import tqdm
 from torch.utils.data import Dataset
+from utils.eval_sampler import DistributedEvalSampler
+os.environ['CUDA_VISIBLE_DEVICES']='3,4,5,6'
 from munch import munchify
 from torchvision.utils import save_image
 from PIL import Image
@@ -67,7 +69,7 @@ def main():
     with open(f'configs/{file}', 'r') as f:
         f_args = json.load(f)
 
-    parser = argparse.ArgumentParser(description="Latent Diffusion")
+    parser = argparse.ArgumentParser(description="AnoPILAD")
     parser.add_argument("--workdir", type=Path, default=f_args["workdir"])
     parser.add_argument("--pipeline_path", type=str, default=f_args["pipeline_path"])
     parser.add_argument("--data_path", type=str, default=f_args["data_path"])
@@ -79,7 +81,7 @@ def main():
     parser.add_argument("--seed", type=int, default=88888888)
     parser.add_argument("--null_prompt", type=str, default="")
     parser.add_argument("--cfg_guidance", type=float, default=7.5)
-    parser.add_argument("--method", type=str, default="pndm")
+    parser.add_argument("--method", type=str, default="ddim")
 
     args = parser.parse_args()
     set_seed(args.seed)
@@ -96,6 +98,7 @@ def main():
 
     csv_path = os.path.join(args.data_path, "metadata.csv")
     fieldnames = ["file_name", "mse_latent", "lpips_pixel"]
+    # output_loss_path = f"{args.workdir}/{args.start_lambda}/loss{distributed_state.process_index}.csv" # loss_all_new
     output_loss_path = f"{args.workdir}/{args.start_lambda}/loss.csv"  #
     output_rec_path = f"{args.workdir}/{args.start_lambda}/"
     create_workdir(output_rec_path, "image_result")
@@ -114,8 +117,10 @@ def main():
         ]
     )
     test_dataset = RecDataset(csv_path, args.data_path, img_transforms, output_rec_path)
+    # sampler = DistributedEvalSampler(test_dataset, rank=distributed_state.process_index, num_replicas=distributed_state.num_processes)
     test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size,
                                                   num_workers=args.num_workers, shuffle=False,
+                                                  # sampler=sampler
                                                   )
     loss_lpips = lpips.LPIPS(net='vgg').to(distributed_state.device)
     for i, (subfolder, fn, basename, src_img, prompt) in tqdm(enumerate(test_dataloader), total=len(test_dataloader)):
@@ -131,7 +136,6 @@ def main():
                                                              gamma=1e-1)
             lpips_pixel = loss_lpips(src_img, result).squeeze(1, 2, 3)
             result = result / 2 + 0.5
-
         write_blocks = []
         for j in range(len(subfolder)):
             os.makedirs(os.path.join(output_rec_path, 'image_result', subfolder[j]), exist_ok=True)

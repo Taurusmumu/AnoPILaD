@@ -227,19 +227,15 @@ def parse_args():
     parser.add_argument(
         "--validation_prompt",
         type=str,
-        default=[
-            'a histopathological photograph of (plasma cell-rich Germinal center)- and (lymphocytes) and (follicular dendritic cells)++',
-            'a histopathological photograph of (small dormant lymphocytes)++ and (lymphocytes)++ and (B-cell-rich non-germinal center) and (mantle zone) and (large B lymphocytes)',
-            'a histopathological photograph of secondary lymphoid follicles',
-            'a histopathological photograph of (mantle zone)+ and (small dormant lymphocytes) and (germinal center) and (lymphocytes) and (follicular dendritic cells)'
-        ],
+        default=None,
+        required=True,
         nargs="+",
         help=("A set of prompts evaluated every `--validation_epochs` and logged to `--report_to`."),
     )
     parser.add_argument(
         "--num_validation_images",
-        type=int,
-        default=4,
+        default=None,
+        required=True,
         help="Number of images that should be generated during validation with `validation_prompt`.",
     )
     parser.add_argument(
@@ -299,7 +295,12 @@ def parse_args():
     parser.add_argument(
         "--train_batch_size", type=int, default=4, help="Batch size (per device) for the training dataloader."
     )
-    parser.add_argument("--num_train_epochs", type=int, default=20)
+    parser.add_argument(
+        "--num_train_epochs",
+        type=int,
+        default=None,
+        required=True,
+    )
     parser.add_argument(
         "--max_train_steps",
         type=int,

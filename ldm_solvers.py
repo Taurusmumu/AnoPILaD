@@ -4,7 +4,7 @@ from compel import Compel
 import torch
 import numpy as np
 import torch.nn.functional as F
-from diffusers import DDIMScheduler, StableDiffusionPipeline,  PNDMScheduler
+from diffusers import DDIMScheduler, StableDiffusionPipeline
 from tqdm import tqdm
 
 
@@ -42,7 +42,7 @@ class StableDiffusion():
         self.compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder)
         self.unet = pipe.unet
 
-        self.scheduler = PNDMScheduler.from_pretrained(model_key, subfolder="scheduler")
+        self.scheduler = DDIMScheduler.from_pretrained(model_key, subfolder="scheduler")
         total_timesteps = len(self.scheduler.alphas)
         self.scheduler.set_timesteps(solver_config.num_sampling, device=device)
         self.skip = total_timesteps // solver_config.num_sampling
@@ -162,8 +162,8 @@ class StableDiffusion():
 
         return z.requires_grad_()
 
-@register_solver("pndm")
-class BasePNDM(StableDiffusion):
+@register_solver("ddim")
+class Sampler(StableDiffusion):
     """
     Basic DDIM solver for SD.
     Useful for text-to-image generation
