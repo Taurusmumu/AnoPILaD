@@ -2,16 +2,16 @@ import sys
 sys.path.append('./')
 sys.path.append('../')
 sys.path.append('../../')
-
+import os
 import argparse
 from pathlib import Path
-import os
 import csv
 import torch
+import lpips
 from tqdm import tqdm
+from skimage.metrics import structural_similarity as ssim
 from torch.utils.data import Dataset
 from eval_sampler import DistributedEvalSampler
-os.environ['CUDA_VISIBLE_DEVICES']='0,1'
 from munch import munchify
 from torchvision.utils import save_image
 from PIL import Image
@@ -19,7 +19,6 @@ from ldm_solvers import get_solver
 from utils import create_workdir, set_seed
 import pandas as pd
 import numpy as np
-import lpips
 import json
 from accelerate import PartialState
 from torchvision import transforms
@@ -31,17 +30,14 @@ class RecDataset(Dataset):
         self.image_root_path = image_root_path
         self.transformer = transformer
         csv_file = pd.read_csv(csv_path)
-        print(f'Load for {len(list(csv_file["file_name"]))} samples')
-
         self.file_names = list(csv_file["file_name"])
-        self.texts = list(csv_file["text"])
+        print(f'Load for {len(list(csv_file["file_name"]))} samples')
 
     def __len__(self):
         return len(self.file_names)
 
     def __getitem__(self, index):
         fn = self.file_names[index]
-        text = self.texts[index]
         image_path = os.path.join(self.image_root_path, fn)
         image = Image.open(image_path).convert("RGB")
         image = self.transformer(image)
@@ -49,14 +45,15 @@ class RecDataset(Dataset):
         dir = fn.split('/')[0]
         fn = fn.split('/')[1]
         basename = fn.split('.')[0]
-        return dir, fn, basename, image, text
+        return dir, fn, basename, image
 
 def main():
-    file = 'config.json'
-    with open(file, 'r') as f:
+
+    file = 'config_anoddpm.json'
+    with open(f'configs/{file}', 'r') as f:
         f_args = json.load(f)
 
-    parser = argparse.ArgumentParser(description="AnoPILAD")
+    parser = argparse.ArgumentParser(description="AnoDDPM")
     parser.add_argument("--workdir", type=Path, default=f_args["workdir"])
     parser.add_argument("--dir_type", type=str, default=f_args["dir_type"])
     parser.add_argument("--pipeline_path", type=str, default=f_args["pipeline_path"])
@@ -67,23 +64,23 @@ def main():
     parser.add_argument("--num_workers", type=str, default=f_args["num_workers"])
     parser.add_argument("--batch_size", type=str, default=f_args["batch_size"])
     parser.add_argument("--seed", type=int, default=88888888)
-    parser.add_argument("--cfg_guidance", type=float, default=7.5)
     parser.add_argument("--method", type=str, default="ddim")
 
     args = parser.parse_args()
     set_seed(args.seed)
     distributed_state = PartialState()
     solver_config = munchify({'num_sampling': args.NFE})
+    callback = None
     solver = get_solver(args.method,
                         pipeline_path=args.pipeline_path,
                         solver_config=solver_config,
                         device=distributed_state.device)
 
-    csv_path = os.path.join(args.data_path, "metadata.csv")
-    fieldnames = ["file_name", "mse_latent", "lpips_pixel"]
-    output_loss_path = os.path.join(args.workdir, args.dir_type, str(args.start_lambda), 'loss.csv')
-    output_rec_path = os.path.join(args.workdir, args.dir_type, str(args.start_lambda))
-    create_workdir(output_rec_path, "image_result")
+    csv_path = os.path.join(args.root_path, "metadata.csv")
+    fieldnames = ["file_name", "mse_pixel", "lpips_pixel", "ssim_pixel"]
+    output_loss_path = f"{args.workdir}/{args.sample_num}/{args.start_lambda}/loss.csv"  #
+    output_rec_path = f"{args.workdir}/{args.sample_num}/{args.start_lambda}/"
+    create_workdir(output_rec_path, "result")
 
     if not os.path.isfile(output_loss_path):
         with open(output_loss_path, mode='w', newline='') as file:
@@ -98,37 +95,50 @@ def main():
             transforms.Normalize([0.5], [0.5]),
         ]
     )
-    test_dataset = RecDataset(csv_path, args.data_path, img_transforms, output_rec_path)
+
+    test_dataset = RecDataset(csv_path, args.root_path, img_transforms, output_rec_path)
     sampler = DistributedEvalSampler(test_dataset, rank=distributed_state.process_index, num_replicas=distributed_state.num_processes)
     test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size,
-                                                  num_workers=args.num_workers, shuffle=False,
+                                                  num_workers=args.num_workers, shuffle=args.shuffle,
                                                   sampler=sampler
                                                   )
+
     loss_lpips = lpips.LPIPS(net='vgg').to(distributed_state.device)
-    for i, (subfolder, fn, basename, src_img, prompt) in tqdm(enumerate(test_dataloader), total=len(test_dataloader)):
+    for i, (subfolder, fn, basename, src_img) in tqdm(enumerate(test_dataloader), total=len(test_dataloader)):
         src_img = src_img.to(distributed_state.device)
         with torch.no_grad():
-            result, loss = solver.sample_forward_backward(gt=src_img,
-                                                             prompt=[list(np.repeat("", len(subfolder))),
-                                                                     list(prompt)],
-                                                             cfg_guidance=args.cfg_guidance,
-                                                             target_size=(256, 256),
-                                                             start_lambda=args.start_lambda,
-                                                             gamma=1e-1)
-            lpips_pixel = loss_lpips(src_img, result).squeeze(1, 2, 3)
+            result = solver.sample_forward_backward(gt=src_img,
+                                                     target_size=(256, 256),
+                                                     callback_fn=callback,
+                                                     start_lambda=args.start_lambda,
+                                                     gamma=args.gamma
+                                                    )
+            lpips_pixel = loss_lpips(src_img, result).squeeze(1,2,3)
+            image_np = (src_img / 2 + 0.5).clamp(0, 1).cpu().numpy()
+            rec_np = (result / 2 + 0.5).clamp(0, 1).cpu().numpy()
             result = result / 2 + 0.5
         write_blocks = []
         for j in range(len(subfolder)):
-            os.makedirs(os.path.join(output_rec_path, 'image_result', subfolder[j]), exist_ok=True)
-            save_image(result[j], f'{output_rec_path}/image_result/{subfolder[j]}/{basename[j]}_rec.png', normalize=True)
+            os.makedirs(os.path.join(output_rec_path, 'result', subfolder[j]), exist_ok=True)
+            save_image(result[j],
+                       args.workdir.joinpath(f'{output_rec_path}/result/{subfolder[j]}/{basename[j]}_rec.png'),
+                       normalize=True)
+            ssim_pixel = 1 - ssim(image_np[j], rec_np[j], channel_axis=0, data_range=1.0)
+            mse_pixel = np.mean((image_np[j] - rec_np[j]) ** 2)
+
             write_blocks.append({
                 "file_name": fn[j],
-                "mse_latent": str(loss[j].item()),
+                "mse_pixel": str(mse_pixel),
                 "lpips_pixel": str(lpips_pixel[j].item()),
+                "ssim_pixel": str(ssim_pixel),
             })
+
         with open(output_loss_path, mode='a', newline='') as file:
             writer = csv.DictWriter(file, fieldnames=fieldnames)
             writer.writerows(write_blocks)
+
+
+    file.close()
 
 
 if __name__ == "__main__":

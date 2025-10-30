@@ -1,0 +1,11 @@
+{
+  "workdir": "./reconstruct_results_anoddpm/",
+  "dir_type": "valid",
+  "data_path": "YOUR_VALID_DIR",
+  "pipeline_path": "PRETRAIN_PATH",
+  "NFE": 100,
+  "img_resolution": 256,
+  "start_lambda": 500,
+  "batch_size": 16,
+  "num_workers": 16
+}
