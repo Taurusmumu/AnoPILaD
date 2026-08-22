@@ -36,14 +36,37 @@ YOUR_DATA_DIR
 ```angular2html
 CUDA_VISIBLE_DEVICES=0 python image_caption.py --data_root_path "YOUR_DATA_DIR" --batch_size 64
 ```
+## Pretrained LoRA Weights
 
+This repository contains the LoRA fine-tuned weights for Stable Diffusion models.  
+| File | Description | Download Link |
+| :--- | :--- | :--- |
+| `pytorch_lora_weights.safetensors` | LoRA weights for Diffusers pipeline | **[Download here](https://drive.google.com/your-file-link-here)** |
+
+This LoRA adapter is designed for use with **Diffusers** pipelines.  
+You need the base model to load it:
+
+```python
+from diffusers import StableDiffusionPipeline
+import torch
+
+# Load the base model
+pipe = StableDiffusionPipeline.from_pretrained(
+    "runwayml/stable-diffusion-v1-5", 
+    torch_dtype=torch.float16
+).to("cuda") 
+pipe.load_lora_weights(
+    "./lora_weights"
+) 
+
+``` 
 
 ## Training
 ```angular2html
 CUDA_VISIBLE_DEVICES=0,1 OMP_NUM_THREADS=2  python -m torch.distributed.run --nproc_per_node=2 train_text_to_image_lora.py --train_batch_size 16 --num_train_epochs 20 --train_data_dir "YOUR_TRAIN_DATA_DIR" --output_dir "./pretrained_weights/sd-model-finetuned-lora/" --validation_prompt ['prompt0', 'prompt1',] --num_validation_images 4
 ```
 
-## Recontruction using the trained model
+## Reconstruction 
 ```angular2html
 CUDA_VISIBLE_DEVICES=0,1 OMP_NUM_THREADS=2  python -m torch.distributed.run --nproc_per_node=2 rec_generate.py 
 ```
