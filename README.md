@@ -41,7 +41,7 @@ CUDA_VISIBLE_DEVICES=0 python image_caption.py --data_root_path "YOUR_DATA_DIR" 
 This repository contains the LoRA fine-tuned weights for Stable Diffusion models.  
 | File | Description | Download Link |
 | :--- | :--- | :--- |
-| `pytorch_lora_weights.safetensors` | LoRA weights for Diffusers pipeline | **[Download here](https://drive.google.com/your-file-link-here)** |
+| `pytorch_lora_weights.safetensors` | LoRA weights for Diffusers pipeline | **[Download here](https://drive.google.com/drive/folders/1eU5JpVueknR4BRugVaHIJmnNaJZufKkN?usp=sharing)** |
 
 This LoRA adapter is designed for use with **Diffusers** pipelines.  
 You need the base model to load it:
